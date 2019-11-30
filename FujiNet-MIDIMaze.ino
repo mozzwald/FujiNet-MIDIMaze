@@ -11,7 +11,7 @@
 #include <ESP8266WiFi.h>
 
 // Uncomment for Debug on 2nd UART (GPIO 2)
-//#define DEBUG_S
+#define DEBUG_S
 
 #define PIN_LED         2
 #define PIN_INT         5
@@ -26,18 +26,20 @@
 
 bool startbit = false;
 
-#define UART_BAUD 31250
+#define UART_BAUD 31250 // MIDI Baud Rate
 #define packTimeout 5 // ms (if nothing more on UART, then send packet)
 #define bufferSize 8192
 
 //#define MODE_AP // connect directly to ESP
 #define MODE_STA // ESP connects to WiFi router
 
-#define PROTOCOL_TCP
+//#define PROTOCOL_TCP
 //#define TCP_SERVER // uncomment for server side
-#define TCP_CLIENT // uncomment for client side
-IPAddress serverIP(192, 168, 1, 119); // uncomment for client side
-//#define PROTOCOL_UDP
+//#define TCP_CLIENT // uncomment for client side
+//IPAddress serverIP(192, 168, 1, 111); // uncomment for client side
+
+#define PROTOCOL_UDP
+IPAddress sendIP(192,168,1,119); // IP of the other FujiNet
 
 #ifdef MODE_AP
 // For AP mode:
@@ -147,6 +149,7 @@ void loop() {
       #ifdef DEBUG_S
       Serial1.println("Connected to server");
       #endif
+      //client.write("Connected!", 10);
     }
     else
       return;
@@ -154,20 +157,41 @@ void loop() {
   #endif
 
   if(client.available()) {
-    while(client.available()) {
+    byte newbuf;
+/*  while(client.available()) {
       buf1[i1] = (uint8_t)client.read(); // read char from client
       if(i1<bufferSize-1) i1++;
-    }
+    }*/
+    newbuf = (uint8_t)client.read();
     // now send to UART:
-    Serial.write(buf1, i1);
+    Serial.write(newbuf);
     Serial.flush();
 #ifdef DEBUG_S
     Serial1.print("MIDI-IN: ");
-    Serial1.write(buf1, i1);
+    Serial1.println(newbuf, HEX);
 #endif
     i1 = 0;
   }
 
+  if(Serial.available())
+  {
+    if (digitalRead(PIN_MTR) == LOW || digitalRead(PIN_CMD) == LOW)
+    {
+      Serial.read(); // Toss the data if motor or command is asserted
+    }
+    else
+    {
+      buf2[i2] = (char)Serial.read(); // read char from UART
+      // now send to WiFi:
+      client.write((char*)buf2, 1);
+#ifdef DEBUG_S
+      Serial1.print("MIDI-OUT: ");
+      Serial1.println(buf2[i2], HEX);
+#endif
+    }
+  }
+
+/*
   if(Serial.available()) {
 
     // read the data until pause:
@@ -198,7 +222,7 @@ void loop() {
     // now send to WiFi:
     client.write((char*)buf2, i2);
     i2 = 0;
-  }
+  }*/
   #endif
 
   #ifdef PROTOCOL_UDP
@@ -212,42 +236,46 @@ void loop() {
     Serial.write(buf1, packetSize);
 #ifdef DEBUG_S
     Serial1.print("MIDI-IN: ");
-    Serial1.println(buf1, packetSize);
+    Serial1.println((char*)buf1);
 #endif
     Serial.flush();
   }
 
   if(Serial.available()) {
     // read the data until pause:
-   
-    while(1) {
-      if(Serial.available()) {
-        if (digitalRead(PIN_MTR) == LOW || digitalRead(PIN_CMD) == LOW){
-          Serial.read(); // Toss the data if motor or command is asserted
-        }else{
-          buf2[i2] = (char)Serial.read(); // read char from UART
-#ifdef DEBUG_S
-          Serial1.print("MIDI-OUT: ");
-          Serial1.println(buf2[i2]);
-#endif
-          if(i2<bufferSize-1) i2++;
+    if (digitalRead(PIN_MTR) == LOW || digitalRead(PIN_CMD) == LOW)
+    {
+      Serial.read(); // Toss the data if motor or command is asserted
+    }
+    else
+    {
+      while(1)
+      {
+        if(Serial.available())
+        {
+            buf2[i2] = (char)Serial.read(); // read char from UART
+  #ifdef DEBUG_S
+            Serial1.print("MIDI-OUT: ");
+            Serial1.println(buf2[i2]);
+  #endif
+            if(i2<bufferSize-1) i2++;
         }
-      } else {
-        //delayMicroseconds(packTimeoutMicros);
-        delay(packTimeout);
-        if(!Serial.available()) {
-          break;
+        else
+        {
+          //delayMicroseconds(packTimeoutMicros);
+          delay(packTimeout);
+          if(!Serial.available())
+            break;
         }
       }
-    }
 
-    // now send to WiFi:  
-    udp.beginPacket(remoteIp, port); // remote IP and port
-    udp.write(buf2, i2);
-    udp.endPacket();
-    i2 = 0;
+      // now send to WiFi:
+      udp.beginPacket(sendIP, port); // remote IP and port
+      udp.write(buf2, i2);
+      udp.endPacket();
+      i2 = 0;
+    }
   }
-    
   #endif
   
   
